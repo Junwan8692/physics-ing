@@ -219,3 +219,26 @@ describe("텍스처는 크롭 픽셀이어야 한다", () => {
     viewer.destroy();
   });
 });
+
+describe("합성 정합", () => {
+  it("풀 캔버스는 컨테이너를 꽉 채우도록 CSS 크기가 잡혀 있다", () => {
+    // 회귀: CSS 크기가 없으면 캔버스가 고유 픽셀 크기(crop.width CSS px)로 표시된다.
+    // 컨테이너는 배경 이미지의 백분율이라 둘이 어긋나고, 크롭 경계에 이음매가 보인다.
+    // 드로잉 버퍼는 크롭 픽셀, CSS 박스는 컨테이너 100% — 이 둘이 정합의 계약이다.
+    const viewer = new JiggleViewer({ adapters: [], createRenderer });
+    const element = document.createElement("div");
+    document.body.append(element);
+    const project = painted();
+    viewer.register("cut", element, project, document.createElement("canvas"));
+    viewer.tick(1 / 60);
+
+    const canvas = element.querySelector("canvas");
+    expect(canvas).not.toBeNull();
+    expect(canvas!.style.width).toBe("100%");
+    expect(canvas!.style.height).toBe("100%");
+    expect(canvas!.style.display).toBe("block");
+    expect(canvas!.width).toBe(project.crop.width);
+    expect(canvas!.height).toBe(project.crop.height);
+    viewer.destroy();
+  });
+});

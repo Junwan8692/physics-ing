@@ -84,6 +84,13 @@ export class JiggleViewer {
       Math.max(this.activeLimit, MAX_ACTIVE_LIMIT) + 1,
       () => {
         const canvas = document.createElement("canvas");
+        // 드로잉 버퍼는 크롭 픽셀, CSS 박스는 컨테이너 100% — 이게 정합의 계약이다.
+        // CSS 크기를 안 잡으면 캔버스가 고유 픽셀 크기로 표시되어 배경과 어긋나고
+        // 크롭 경계에 이음매가 보인다. SceneRenderer 는 padding 0 에서 메시를
+        // 캔버스에 1:1로 맞추므로, 캔버스가 컨테이너를 정확히 채우면 정합이 맞는다.
+        canvas.style.width = "100%";
+        canvas.style.height = "100%";
+        canvas.style.display = "block";
         return { canvas, renderer: createRenderer(canvas) };
       },
       ({ renderer }) => renderer.dispose(),

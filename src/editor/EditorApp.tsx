@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { cropRectForMask, maskBoundsPx } from "../core/crop";
 import type { JiggleProject, Rect } from "../core/types";
 import { createProject, deserializeProject, serializeProject } from "../project/io";
@@ -14,6 +14,7 @@ import {
 import { BRUSH_MAX, BRUSH_MIN, DEFAULT_BRUSH, type BrushSettings } from "./brush";
 import { CropPreview } from "./CropPreview";
 import { MaskCanvas } from "./MaskCanvas";
+import { LivePreview } from "./LivePreview";
 import { ParameterPanel } from "./ParameterPanel";
 import { useImageFile } from "./useImageFile";
 
@@ -145,8 +146,23 @@ export function EditorApp() {
   const [motion, setMotion] = useState<MotionParameters>({ ...MOTION_PRESETS.purupuru });
   const [brush, setBrush] = useState<BrushSettings>(DEFAULT_BRUSH);
   const [seed, setSeed] = useState(1);
-  const [showCrop, setShowCrop] = useState(false);
+  const [mode, setMode] = useState<"paint" | "crop" | "preview">("paint");
   const [message, setMessage] = useState<string | null>(null);
+
+  /** 미리보기·저장이 같은 경로를 쓰도록 프로젝트를 한 곳에서 만든다. */
+  const previewProject = useMemo((): JiggleProject | null => {
+    if (!image) return null;
+    const crop = cropForRegion(region, image.width, image.height);
+    if (!crop) return null;
+    return toProject({
+      source: { src: image.name, width: image.width, height: image.height },
+      crop, region, motion, seed,
+    });
+  }, [image, region, motion, seed]);
+
+  useEffect(() => {
+    if (mode === "preview" && previewProject === null) setMode("paint");
+  }, [mode, previewProject]);
 
   const pickImage = (event: ChangeEvent<HTMLInputElement>): void => {
     const file = event.currentTarget.files?.[0];
@@ -203,17 +219,28 @@ export function EditorApp() {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input type="file" accept="image/png,image/jpeg,image/webp" aria-label="원본 이미지" onChange={pickImage} />
           {image ? (
-            <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              <input type="checkbox" checked={showCrop} onChange={(event) => setShowCrop(event.currentTarget.checked)} />
-              크롭 미리보기
-            </label>
+            <div role="group" aria-label="편집 모드" style={{ display: "flex", gap: 6 }}>
+              <button type="button" aria-pressed={mode === "paint"} onClick={() => setMode("paint")}>칠하기</button>
+              <button type="button" aria-pressed={mode === "crop"} onClick={() => setMode("crop")}>크롭 확인</button>
+              <button
+                type="button" aria-pressed={mode === "preview"}
+                disabled={previewProject === null}
+                title={previewProject === null ? "먼저 흔들 영역을 칠하세요." : undefined}
+                onClick={() => setMode("preview")}
+              >
+                미리보기
+              </button>
+            </div>
           ) : null}
         </div>
         {imageError ? <p role="alert" style={{ color: "#c00", margin: 0 }}>{imageError}</p> : null}
         {!image ? <p style={{ margin: 0, color: "#666" }}>이미지를 불러오면 칠할 수 있습니다.</p> : null}
-        {image && showCrop ? <CropPreview image={image.element} region={region} /> : null}
-        {image && !showCrop ? (
+        {image && mode === "crop" ? <CropPreview image={image.element} region={region} /> : null}
+        {image && mode === "paint" ? (
           <MaskCanvas image={image.element} region={region} brush={brush} onRegionChange={setRegion} />
+        ) : null}
+        {image && mode === "preview" && previewProject ? (
+          <LivePreview image={image.element} project={previewProject} />
         ) : null}
       </div>
 

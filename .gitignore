@@ -2,3 +2,6 @@ node_modules
 dist
 .DS_Store
 *.local
+
+# 로컬 도구 설정 (커밋 대상 아님)
+.claude/

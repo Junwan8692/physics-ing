@@ -1,5 +1,5 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { regionWeightAt, type RegionSnapshot } from "../vendor/purupuru/region/model";
+import type { RegionSnapshot } from "../vendor/purupuru/region/model";
 import { beginStroke, extendStroke, nextStrokeId, type BrushSettings } from "./brush";
 
 export interface MaskCanvasProps {
@@ -10,8 +10,6 @@ export interface MaskCanvasProps {
   onRegionChange: (region: RegionSnapshot) => void;
 }
 
-/** 오버레이 표본 해상도. 눈으로 보는 미리보기라 격자보다 곱게 갈 이유가 없다. */
-const OVERLAY_SAMPLES = 128;
 /** 백킹 스토어 상한. 1280×5120 슬라이스를 원본 크기로 올릴 이유가 없다. */
 const MAX_BACKING = 1024;
 
@@ -20,9 +18,22 @@ const imageSize = (image: HTMLImageElement): { width: number; height: number } =
   height: image.naturalHeight || image.height,
 });
 
+/**
+ * 스트로크의 픽셀 반지름.
+ *
+ * 벤더의 포함 판정은 축 스케일 {w/short, h/short} 를 곱한 UV 공간에서 거리를 잰다.
+ * dx_uv·(w/short) = dx_px/short 이므로 그 공간은 픽셀 기준 등방이고, 결국 스트로크는
+ * 픽셀 공간에서 반지름 (size/2)·short 인 진짜 원 — 즉 둥근 캡 폴리라인이다.
+ * 그래서 표본 격자로 훑을 필요 없이 캔버스 경로로 바로 그릴 수 있다.
+ */
+export const strokeRadiusPx = (size: number, imageWidth: number, imageHeight: number): number =>
+  (size / 2) * Math.min(imageWidth, imageHeight);
+
 export function MaskCanvas({ image, region, brush, onRegionChange }: MaskCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const paintingRef = useRef(false);
+  /** 마스크 합성용 오프스크린. 리드로우마다 새로 만들지 않는다. */
+  const maskRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -38,21 +49,49 @@ export function MaskCanvas({ image, region, brush, onRegionChange }: MaskCanvasP
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-    // ponytail: 표본 × 스트로크 × 점 을 매 리드로우마다 전부 훑는다.
-    // 획이 수백 개로 늘어 눈에 띄게 느려지면 그때 오프스크린 캔버스에 캐시한다.
-    const cellWidth = canvas.width / OVERLAY_SAMPLES;
-    const cellHeight = canvas.height / OVERLAY_SAMPLES;
-    context.fillStyle = "#ff3fa4";
-    for (let row = 0; row < OVERLAY_SAMPLES; row += 1) {
-      const v = (row + 0.5) / OVERLAY_SAMPLES;
-      for (let column = 0; column < OVERLAY_SAMPLES; column += 1) {
-        const weight = regionWeightAt(region, (column + 0.5) / OVERLAY_SAMPLES, v, width, height);
-        if (weight <= 0) continue;
-        // 강도가 그대로 보여야 저작자가 브러시 strength를 눈으로 맞출 수 있다.
-        context.globalAlpha = 0.2 + weight * 0.45;
-        context.fillRect(column * cellWidth, row * cellHeight, cellWidth + 1, cellHeight + 1);
+    // 마스크는 알파 채널로만 쌓고 마지막에 한 번 합성한다.
+    // 획마다 본 캔버스에 바로 그리면 겹친 곳이 진해져 강도를 못 읽는다.
+    const mask = maskRef.current ?? (maskRef.current = document.createElement("canvas"));
+    mask.width = canvas.width;
+    mask.height = canvas.height;
+    const maskContext = mask.getContext("2d");
+    if (!maskContext) return;
+
+    maskContext.lineCap = "round";
+    maskContext.lineJoin = "round";
+    maskContext.strokeStyle = "#ff3fa4";
+    maskContext.fillStyle = "#ff3fa4";
+
+    for (const stroke of region.strokes) {
+      const erasing = (stroke.operation ?? (stroke.mode === "paint" ? "add" : "subtract")) === "subtract";
+      // 지우개는 알파를 깎는다. 벤더의 weight 합성과 정확히 같지는 않지만
+      // 겹침 순서와 강도가 눈에 그대로 보이는 쪽을 택했다.
+      maskContext.globalCompositeOperation = erasing ? "destination-out" : "source-over";
+      // 약한 획도 보이도록 바닥을 깔아 준다. 0.05 강도가 안 보이면 칠한 줄도 모른다.
+      maskContext.globalAlpha = Math.min(1, 0.3 + (stroke.strength ?? 1) * 0.7);
+      const radius = strokeRadiusPx(stroke.size, width, height) * scale;
+      const first = stroke.points[0];
+      if (!first) continue;
+      if (stroke.points.length === 1) {
+        maskContext.beginPath();
+        maskContext.arc(first.x * canvas.width, first.y * canvas.height, radius, 0, Math.PI * 2);
+        maskContext.fill();
+        continue;
       }
+      maskContext.lineWidth = radius * 2;
+      maskContext.beginPath();
+      maskContext.moveTo(first.x * canvas.width, first.y * canvas.height);
+      for (let index = 1; index < stroke.points.length; index += 1) {
+        const point = stroke.points[index];
+        if (point) maskContext.lineTo(point.x * canvas.width, point.y * canvas.height);
+      }
+      maskContext.stroke();
     }
+
+    maskContext.globalCompositeOperation = "source-over";
+    maskContext.globalAlpha = 1;
+    context.globalAlpha = 0.62;
+    context.drawImage(mask, 0, 0);
     context.globalAlpha = 1;
   }, [image, region]);
 

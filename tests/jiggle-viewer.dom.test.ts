@@ -182,3 +182,40 @@ describe("JiggleViewer", () => {
     for (const renderer of renderers) expect(renderer.disposals).toBe(1);
   });
 });
+
+describe("텍스처는 크롭 픽셀이어야 한다", () => {
+  it("전체 원본이 아니라 크롭 크기의 이미지를 업로드한다", () => {
+    // 회귀: 메시 UV는 크롭 기준 0..1인데 전체 이미지를 올리면
+    // 원본 전체가 크롭 사각형 안으로 찌그러져 들어간다.
+    const drawn: unknown[] = [];
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      drawImage: (...args: unknown[]) => drawn.push(args),
+    } as unknown as CanvasRenderingContext2D);
+
+    const uploaded: TexImageSource[] = [];
+    const viewer = new JiggleViewer({
+      adapters: [],
+      createRenderer: () => {
+        const renderer = new FakeRenderer();
+        renderer.setImage = (source: TexImageSource): void => { uploaded.push(source); };
+        return renderer;
+      },
+    });
+    const project = painted();
+    const source = document.createElement("canvas");
+    source.width = project.source.width;
+    source.height = project.source.height;
+
+    const element = document.createElement("div");
+    document.body.append(element);
+    viewer.register("cut", element, project, source);
+    viewer.tick(1 / 60);
+
+    expect(uploaded).toHaveLength(1);
+    const texture = uploaded[0] as HTMLCanvasElement;
+    expect(texture.width).toBe(project.crop.width);
+    expect(texture.height).toBe(project.crop.height);
+    expect(texture).not.toBe(source);
+    viewer.destroy();
+  });
+});

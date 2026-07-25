@@ -1,6 +1,6 @@
 import { buildCut, createSimulator } from "../core/buildCut";
 import { MAX_ACTIVE_LIMIT, activeLimitForTier, qualityForTier, SOLVER_QUALITY } from "../core/quality";
-import type { InputAdapter, JiggleProject, QualityTierId } from "../core/types";
+import type { InputAdapter, JiggleProject, QualityTierId, Rect } from "../core/types";
 import { combineInputs } from "../input/combine";
 import type { MeshData, PhysicsInput } from "../vendor/purupuru/core/types";
 import type { PhysicsSimulator } from "../vendor/purupuru/core/simulator";
@@ -36,6 +36,8 @@ interface CutEntry {
   intersecting: boolean;
   /** 활성일 때만 존재한다. 비활성화하면 버린다 — 639 KB/cut × 150 = 96MB. */
   runtime: CutRuntime | undefined;
+  /** 크롭만 잘라낸 텍스처. 첫 활성화에서 만들고 재활성화 때 재사용한다. */
+  texture: TexImageSource | undefined;
 }
 
 interface PooledRenderer {
@@ -96,7 +98,7 @@ export class JiggleViewer {
   public register(id: string, element: HTMLElement, project: JiggleProject, image: TexImageSource): void {
     this.unregister(id);
     // 관찰자가 없는 환경(SSR·테스트)에서는 등록만으로 보이는 것으로 친다.
-    this.cuts.set(id, { element, project, image, intersecting: this.observer === undefined, runtime: undefined });
+    this.cuts.set(id, { element, project, image, intersecting: this.observer === undefined, runtime: undefined, texture: undefined });
     this.observer?.observe(element);
   }
 
@@ -188,10 +190,32 @@ export class JiggleViewer {
     const { renderer, canvas } = this.pool.acquire(id);
     canvas.width = built.crop.width;
     canvas.height = built.crop.height;
-    renderer.setImage(cut.image);
+    renderer.setImage(this.textureFor(cut, built.crop));
     renderer.setMesh(built.mesh);
     cut.element.append(canvas);
     cut.runtime = { simulator, renderer, canvas };
+  }
+
+  /**
+   * 메시 UV는 크롭 기준 0..1이므로 텍스처도 크롭 픽셀이어야 한다.
+   * 원본 전체를 올리면 이미지가 통째로 크롭 사각형 안에 찌그러져 들어간다.
+   * 원본을 그대로 올리면 MAX_TEXTURE_SIZE(4096 기기 다수)에도 걸린다 — 스펙 §4.2.
+   */
+  private textureFor(cut: CutEntry, crop: Rect): TexImageSource {
+    if (cut.texture) return cut.texture;
+    const canvas = document.createElement("canvas");
+    canvas.width = crop.width;
+    canvas.height = crop.height;
+    const context = canvas.getContext("2d");
+    // 2D 컨텍스트가 없는 환경에서는 원본을 올린다. 화면은 틀리지만 죽지는 않는다.
+    if (!context) return cut.image;
+    context.drawImage(
+      cut.image as CanvasImageSource,
+      crop.x, crop.y, crop.width, crop.height,
+      0, 0, crop.width, crop.height,
+    );
+    cut.texture = canvas;
+    return canvas;
   }
 
   private deactivate(id: string): void {

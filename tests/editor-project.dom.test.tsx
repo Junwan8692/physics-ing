@@ -1,15 +1,15 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
+import { EditorApp } from "../src/editor/EditorApp";
 import {
-  EditorApp,
   cropForRegion,
   fromCropUv,
   regionFromProject,
   regionToCropUv,
   toCropUv,
   toProject,
-} from "../src/editor/EditorApp";
+} from "../src/editor/episode";
 import { validateImageFile } from "../src/editor/useImageFile";
 import { deserializeProject, serializeProject } from "../src/project/io";
 import { ProjectParseError } from "../src/project/schema";
@@ -127,7 +127,7 @@ afterEach(() => {
 });
 
 describe("EditorApp", () => {
-  it("이미지 없이도 렌더된다", async () => {
+  it("슬라이스 없이도 렌더된다", async () => {
     (globalThis as unknown as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
     const host = document.createElement("div");
     document.body.append(host);
@@ -135,8 +135,10 @@ describe("EditorApp", () => {
 
     const root = createRoot(host);
     await act(async () => { root.render(<EditorApp />); });
-    expect(host.querySelector('input[aria-label="원본 이미지"]')).not.toBeNull();
-    expect(host.textContent).toContain("이미지를 불러오면");
+    expect(host.querySelector('input[aria-label="슬라이스 이미지"]')).not.toBeNull();
+    expect(host.textContent).toContain("불러오면 칠할 수 있습니다");
+    // 슬라이스가 하나도 없으면 미리보기로 갈 문이 아예 없어야 한다.
+    expect(host.querySelector('[aria-label="편집 모드"]')).toBeNull();
     await act(async () => { root.unmount(); });
   });
 });

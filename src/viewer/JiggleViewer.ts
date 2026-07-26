@@ -1,5 +1,5 @@
 import { buildCut, createSimulator } from "../core/buildCut";
-import { MAX_ACTIVE_LIMIT, activeLimitForTier, qualityForTier, SOLVER_QUALITY } from "../core/quality";
+import { MAX_ACTIVE_LIMIT, activeLimitForTier, qualityForTier, SOLVER_QUALITY, type QualityGovernor } from "../core/quality";
 import type { InputAdapter, JiggleProject, QualityTierId, Rect } from "../core/types";
 import { combineInputs } from "../input/combine";
 import type { MeshData, PhysicsInput } from "../vendor/purupuru/core/types";
@@ -21,6 +21,12 @@ export interface JiggleViewerOptions {
   activeLimit?: number;
   reducedMotion?: boolean;
   createRenderer?: (canvas: HTMLCanvasElement) => ViewerRenderer;
+  /**
+   * 넘기면 뷰어가 프레임마다 물리 소요 시간을 먹이고, 티어가 바뀌면 스스로
+   * setQualityTier를 호출한다. 거버너 티어가 activeLimit 옵션보다 우선한다.
+   * 호출자가 같은 인스턴스의 tier를 읽으면 현재 티어 표시가 된다.
+   */
+  governor?: QualityGovernor;
 }
 
 interface CutRuntime {
@@ -72,10 +78,18 @@ export class JiggleViewer {
   private readonly observer: IntersectionObserver | undefined;
   /** 시뮬레이터 생성 시점에 고정되므로 활성화 순간의 값이 그 컷의 품질이 된다. */
   private solverQuality = SOLVER_QUALITY;
+  private readonly governor: QualityGovernor | undefined;
+  /** 마지막으로 setQualityTier에 반영한 거버너 티어. 매 프레임 재적용을 피한다. */
+  private governorTier: QualityTierId | undefined;
 
   public constructor(options: JiggleViewerOptions) {
     this.adapters = options.adapters;
     this.activeLimit = options.activeLimit ?? MAX_ACTIVE_LIMIT;
+    this.governor = options.governor;
+    if (this.governor) {
+      this.governorTier = this.governor.tier;
+      this.setQualityTier(this.governorTier);
+    }
     this.reducedMotion = options.reducedMotion ?? prefersReducedMotion();
     const createRenderer = options.createRenderer ?? defaultCreateRenderer;
     // 풀은 가능한 최대 활성 수 + 1로 고정한다. 활성 상한이 런타임에 내려가도
@@ -151,6 +165,7 @@ export class JiggleViewer {
     );
     if (active.length === 0) return;
     const inputForTick = (): PhysicsInput => input;
+    const started = this.governor ? performance.now() : 0;
     for (const id of active) {
       const runtime = this.cuts.get(id)?.runtime;
       if (!runtime) continue;
@@ -158,6 +173,15 @@ export class JiggleViewer {
       // frameOffset은 항상 0. 렌더 시점 균일 이동은 크롭 슬래브를 통째로 미끄러뜨려
       // 아래 정적 이미지와 어긋난다. 드래그 입력은 frame.acceleration으로 이미 살아 있다.
       runtime.renderer.render({ frameOffset: { x: 0, y: 0 } });
+    }
+    if (this.governor) {
+      // 물리를 실제로 돌린 프레임만 잰다. 유휴 프레임(0ms)을 기록하면 놀고 있는 동안
+      // 티어가 올라가고, 무거운 컷을 만나는 순간 측정 창이 찰 때까지 버벅인다.
+      this.governor.record(performance.now() - started);
+      if (this.governor.tier !== this.governorTier) {
+        this.governorTier = this.governor.tier;
+        this.setQualityTier(this.governorTier);
+      }
     }
   }
 

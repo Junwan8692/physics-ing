@@ -7,6 +7,7 @@ vi.mock("../src/core/buildCut", async (importOriginal) => {
 });
 
 import { buildCut } from "../src/core/buildCut";
+import { QualityGovernor } from "../src/core/quality";
 import { createProject } from "../src/project/io";
 import { JiggleViewer, type ViewerRenderer } from "../src/viewer/JiggleViewer";
 import type { JiggleProject } from "../src/core/types";
@@ -54,7 +55,10 @@ const createRenderer = (): ViewerRenderer => {
   return renderer;
 };
 
-function makeViewer(count: number, options: { activeLimit?: number; reducedMotion?: boolean } = {}) {
+function makeViewer(
+  count: number,
+  options: { activeLimit?: number; reducedMotion?: boolean; governor?: QualityGovernor } = {},
+) {
   const viewer = new JiggleViewer({ adapters: [], createRenderer, activeLimit: 2, ...options });
   const image = document.createElement("img");
   const elements: HTMLElement[] = [];
@@ -180,6 +184,68 @@ describe("JiggleViewer", () => {
     viewer.destroy();
     expect(renderers.length).toBeGreaterThan(0);
     for (const renderer of renderers) expect(renderer.disposals).toBe(1);
+  });
+});
+
+describe("QualityGovernor 배선", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** tick당 두 번(시작·끝) 불리는 performance.now를 프레임당 msPerFrame 걸린 것처럼 꾸민다. */
+  function fakePhysicsCost(msPerFrame: number): void {
+    let calls = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => (calls++ % 2 === 0 ? 0 : msPerFrame));
+  }
+
+  function degradedGovernor(): QualityGovernor {
+    const governor = new QualityGovernor();
+    for (let index = 0; index < 30; index += 1) governor.record(3);
+    return governor;
+  }
+
+  it("느린 프레임이 측정 창을 채우면 활성 컷 상한이 내려간다", () => {
+    fakePhysicsCost(3); // slowMs 2.0 초과
+    const governor = new QualityGovernor();
+    const { viewer } = makeViewer(3, { governor });
+    viewer.tick(1 / 60);
+    expect(viewer.activeIds).toHaveLength(2);
+    for (let index = 0; index < 29; index += 1) viewer.tick(1 / 60);
+    expect(governor.tier).toBe("medium");
+    viewer.tick(1 / 60);
+    expect(viewer.activeIds).toHaveLength(1);
+    viewer.destroy();
+  });
+
+  it("생성 시점의 거버너 티어가 초기 상한이 된다", () => {
+    const { viewer } = makeViewer(3, { governor: degradedGovernor() });
+    viewer.tick(1 / 60);
+    expect(viewer.activeIds).toHaveLength(1);
+    viewer.destroy();
+  });
+
+  it("빠른 프레임이 충분히 이어지면 상한이 회복된다", () => {
+    fakePhysicsCost(0.5); // fastMs 1.0 미만
+    const governor = degradedGovernor();
+    const { viewer } = makeViewer(3, { governor });
+    viewer.tick(1 / 60);
+    expect(viewer.activeIds).toHaveLength(1);
+    for (let index = 0; index < 120; index += 1) viewer.tick(1 / 60);
+    expect(governor.tier).toBe("high");
+    viewer.tick(1 / 60);
+    expect(viewer.activeIds).toHaveLength(2);
+    viewer.destroy();
+  });
+
+  it("활성 컷이 없는 프레임은 측정에 넣지 않는다", () => {
+    // 회귀 가드: 아무 일도 안 한 프레임(물리 0ms)을 기록하면 놀고 있는 동안
+    // 티어가 올라가고, 무거운 컷을 만나는 순간 30프레임 동안 버벅인 뒤에야 내려온다.
+    fakePhysicsCost(0.5);
+    const governor = degradedGovernor();
+    const { viewer } = makeViewer(0, { governor });
+    for (let index = 0; index < 200; index += 1) viewer.tick(1 / 60);
+    expect(governor.tier).toBe("medium");
+    viewer.destroy();
   });
 });
 

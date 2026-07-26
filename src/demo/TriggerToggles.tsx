@@ -1,5 +1,5 @@
 import { useReducer } from "react";
-import type { InputAdapter } from "../core/types";
+import type { InputAdapter, QualityTierId } from "../core/types";
 import type { AutoAdapter } from "../input/auto";
 import type { DeviceMotionAdapter, DeviceMotionStatus } from "../input/devicemotion";
 import type { PointerAdapter } from "../input/pointer";
@@ -10,6 +10,8 @@ export interface TriggerTogglesProps {
   pointer: PointerAdapter;
   devicemotion: DeviceMotionAdapter;
   auto: AutoAdapter;
+  /** QualityGovernor가 고른 현재 품질 티어. DevTools CPU 스로틀링으로 강등을 눈으로 확인하는 용도. */
+  tier: QualityTierId;
 }
 
 const STATUS_LABELS: Record<DeviceMotionStatus, string> = {
@@ -17,6 +19,12 @@ const STATUS_LABELS: Record<DeviceMotionStatus, string> = {
   active: "동작 중",
   denied: "거부됨",
   unsupported: "미지원",
+};
+
+const TIER_LABELS: Record<QualityTierId, string> = {
+  high: "high — 활성 컷 2",
+  medium: "medium — 활성 컷 1",
+  low: "low — 활성 컷 1 · 계산 축소",
 };
 
 const rowStyle = {
@@ -30,7 +38,7 @@ const rowStyle = {
  * 어댑터를 상태로 복제하지 않는다. 어댑터 객체 자체가 상태이고(enabled/gain/smoothingSeconds가
  * 런타임 가변) rAF 루프가 매 프레임 그 값을 읽으므로, 여기서는 직접 쓰고 리렌더만 걸면 된다.
  */
-export function TriggerToggles({ scroll, pointer, devicemotion, auto }: TriggerTogglesProps) {
+export function TriggerToggles({ scroll, pointer, devicemotion, auto, tier }: TriggerTogglesProps) {
   const [, rerender] = useReducer((count: number) => count + 1, 0);
 
   const triggers: { label: string; adapter: InputAdapter }[] = [
@@ -102,6 +110,9 @@ export function TriggerToggles({ scroll, pointer, devicemotion, auto }: TriggerT
       </button>
       <div>
         센서 상태: <output>{STATUS_LABELS[devicemotion.status]}</output>
+      </div>
+      <div>
+        품질 티어: <output>{TIER_LABELS[tier]}</output>
       </div>
     </section>
   );

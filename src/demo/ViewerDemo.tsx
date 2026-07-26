@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import type { JiggleProject } from "../core/types";
+import { QualityGovernor } from "../core/quality";
+import type { JiggleProject, QualityTierId } from "../core/types";
 import { createAutoAdapter } from "../input/auto";
 import { createDeviceMotionAdapter } from "../input/devicemotion";
 import { createPointerAdapter } from "../input/pointer";
@@ -69,6 +70,8 @@ export function ViewerDemo() {
     return { scroll, pointer, devicemotion, auto };
   }, []);
 
+  const governor = useMemo(() => new QualityGovernor(), []);
+  const [tier, setTier] = useState<QualityTierId>(governor.tier);
   const [slices, setSlices] = useState<Slice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const viewerRef = useRef<JiggleViewer | null>(null);
@@ -82,7 +85,7 @@ export function ViewerDemo() {
   useEffect(() => {
     const viewer = new JiggleViewer({
       adapters: [adapters.scroll, adapters.pointer, adapters.devicemotion, adapters.auto],
-      activeLimit: 2,
+      governor, // 활성 상한은 거버너 티어가 정한다 (high = 컷 2).
     });
     viewerRef.current = viewer;
 
@@ -93,6 +96,8 @@ export function ViewerDemo() {
       const dtSeconds = Math.min(0.1, Math.max(0, (now - previous) / 1000));
       previous = now;
       viewer.tick(dtSeconds);
+      // 값이 같으면 React가 리렌더를 생략하므로 매 프레임 불러도 공짜다.
+      setTier((current) => (current === governor.tier ? current : governor.tier));
       frame = requestAnimationFrame(step);
     };
     frame = requestAnimationFrame(step);
@@ -102,7 +107,7 @@ export function ViewerDemo() {
       viewerRef.current = null;
       viewer.destroy();
     };
-  }, [adapters]);
+  }, [adapters, governor]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -138,7 +143,7 @@ export function ViewerDemo() {
       onPointerCancel={endDrag}
       onPointerLeave={endDrag}
     >
-      <TriggerToggles {...adapters} />
+      <TriggerToggles {...adapters} tier={tier} />
 
       <header style={{ display: "grid", gap: 8, padding: 12, fontSize: 13 }}>
         <h1 style={{ fontSize: 16, margin: 0 }}>웹툰 지글 뷰어 데모</h1>

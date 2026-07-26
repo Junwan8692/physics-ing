@@ -9,7 +9,7 @@ import {
 } from "./episode";
 import { EpisodePreview, type PreviewSlice } from "./EpisodePreview";
 import { LivePreview } from "./LivePreview";
-import { MaskCanvas } from "./MaskCanvas";
+import { MaskCanvas, strokeRadiusPx } from "./MaskCanvas";
 import { ParameterPanel } from "./ParameterPanel";
 import { SliceStrip } from "./SliceStrip";
 import { useImageFiles } from "./useImageFile";
@@ -45,6 +45,11 @@ export function EditorApp() {
   }, [loaded]);
 
   const active = slices[activeIndex] ?? null;
+
+  /** 브러시 지름을 원본 픽셀로. 0.120 같은 정규화 값은 저작자에게 아무 의미가 없다. */
+  const brushDiameterPx = active
+    ? Math.round(strokeRadiusPx(brush.size, active.width, active.height) * 2)
+    : 0;
   const anyPainted = slices.some(isPainted);
 
   /** 미리보기·저장이 같은 경로를 쓰도록 프로젝트를 한 곳에서 만든다. */
@@ -173,7 +178,7 @@ export function EditorApp() {
               type="range" min={BRUSH_MIN} max={BRUSH_MAX} step={0.005} value={brush.size}
               onChange={(event) => setBrush({ ...brush, size: event.currentTarget.valueAsNumber })}
             />
-            <output>{brush.size.toFixed(3)}</output>
+            <output title="브러시 지름 (원본 이미지 픽셀)">{brushDiameterPx ? `${brushDiameterPx}px` : brush.size.toFixed(3)}</output>
           </label>
           <label style={rowStyle}>
             <span>강도</span>
@@ -181,7 +186,7 @@ export function EditorApp() {
               type="range" min={0.05} max={1} step={0.05} value={brush.strength}
               onChange={(event) => setBrush({ ...brush, strength: event.currentTarget.valueAsNumber })}
             />
-            <output>{brush.strength.toFixed(2)}</output>
+            <output>{Math.round(brush.strength * 100)}%</output>
           </label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {/*

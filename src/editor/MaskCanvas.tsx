@@ -1,4 +1,4 @@
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { RegionSnapshot } from "../vendor/purupuru/region/model";
 import { beginStroke, extendStroke, nextStrokeId, type BrushSettings } from "./brush";
 
@@ -34,6 +34,9 @@ export function MaskCanvas({ image, region, brush, onRegionChange }: MaskCanvasP
   const paintingRef = useRef(false);
   /** 마스크 합성용 오프스크린. 리드로우마다 새로 만들지 않는다. */
   const maskRef = useRef<HTMLCanvasElement | null>(null);
+  const cursorRef = useRef<HTMLCanvasElement>(null);
+  /** 포인터가 캔버스 위에 있을 때의 UV. 벗어나면 null 이라 커서가 사라진다. */
+  const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -95,6 +98,46 @@ export function MaskCanvas({ image, region, brush, onRegionChange }: MaskCanvasP
     context.globalAlpha = 1;
   }, [image, region]);
 
+  // 브러시 커서는 전용 오버레이에 그린다. 포인터가 움직일 때마다 이미지와 마스크를
+  // 다시 그릴 이유가 없다 — 여기는 원 하나만 지웠다 그린다.
+  useEffect(() => {
+    const cursor = cursorRef.current;
+    const base = canvasRef.current;
+    if (!cursor || !base) return;
+    cursor.width = base.width;
+    cursor.height = base.height;
+    const context = cursor.getContext("2d");
+    if (!context) return;
+
+    context.clearRect(0, 0, cursor.width, cursor.height);
+    if (!hover) return;
+
+    const { width, height } = imageSize(image);
+    const scale = Math.min(1, MAX_BACKING / Math.max(width, height));
+    const radius = strokeRadiusPx(brush.size, width, height) * scale;
+    const x = hover.x * cursor.width;
+    const y = hover.y * cursor.height;
+
+    // 어떤 그림 위에서도 보이도록 흰 테두리 안에 검은 테두리를 겹친다.
+    // 지우개는 점선으로 구분한다 — 색만으로는 칠하기와 헷갈린다.
+    context.setLineDash(brush.mode === "erase" ? [6, 5] : []);
+    context.lineWidth = 3;
+    context.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.stroke();
+    context.lineWidth = 1;
+    context.strokeStyle = "rgba(0, 0, 0, 0.85)";
+    context.stroke();
+    context.setLineDash([]);
+
+    // 가운데 점은 브러시 강도. 진할수록 세게 칠해진다.
+    context.fillStyle = `rgba(255, 63, 164, ${0.25 + brush.strength * 0.75})`;
+    context.beginPath();
+    context.arc(x, y, Math.max(1.5, radius * 0.06), 0, Math.PI * 2);
+    context.fill();
+  }, [image, brush, hover]);
+
   const uvFromEvent = (event: ReactPointerEvent<HTMLCanvasElement>): { x: number; y: number } => {
     const box = event.currentTarget.getBoundingClientRect();
     return {
@@ -105,6 +148,7 @@ export function MaskCanvas({ image, region, brush, onRegionChange }: MaskCanvasP
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
     event.currentTarget.setPointerCapture?.(event.pointerId);
+    setHover(uvFromEvent(event));
     paintingRef.current = true;
     onRegionChange({
       ...region,
@@ -113,6 +157,7 @@ export function MaskCanvas({ image, region, brush, onRegionChange }: MaskCanvasP
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
+    setHover(uvFromEvent(event));
     if (!paintingRef.current) return;
     const last = region.strokes[region.strokes.length - 1];
     if (!last) return;
@@ -120,6 +165,11 @@ export function MaskCanvas({ image, region, brush, onRegionChange }: MaskCanvasP
     // 최소 간격에 걸려 점이 안 늘었으면 리렌더도 시키지 않는다.
     if (extended.points.length === last.points.length) return;
     onRegionChange({ ...region, strokes: [...region.strokes.slice(0, -1), extended] });
+  };
+
+  const handleLeave = (): void => {
+    // 칠하는 중에 캔버스를 벗어나도 획은 계속된다(포인터 캡처). 커서만 감춘다.
+    if (!paintingRef.current) setHover(null);
   };
 
   const handlePointerUp = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
@@ -130,15 +180,28 @@ export function MaskCanvas({ image, region, brush, onRegionChange }: MaskCanvasP
   };
 
   return (
-    <canvas
-      ref={canvasRef}
-      aria-label="흔들 영역 칠하기"
-      role="img"
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      style={{ display: "block", width: "100%", height: "auto", touchAction: "none", cursor: "crosshair" }}
-    />
+    <div style={{ position: "relative", lineHeight: 0 }}>
+      <canvas
+        ref={canvasRef}
+        aria-label="흔들 영역 칠하기"
+        role="img"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onPointerLeave={() => { handleLeave(); }}
+        style={{
+          display: "block", width: "100%", height: "auto",
+          touchAction: "none",
+          // 커서 원이 곧 브러시 크기라 기본 커서는 숨긴다. 두 개가 보이면 헷갈린다.
+          cursor: hover ? "none" : "crosshair",
+        }}
+      />
+      <canvas
+        ref={cursorRef}
+        aria-hidden
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+      />
+    </div>
   );
 }

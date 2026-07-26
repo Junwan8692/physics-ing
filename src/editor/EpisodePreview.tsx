@@ -8,6 +8,7 @@ import {
   DEFAULT_SCROLL_SMOOTHING_SECONDS,
 } from "../input/scroll";
 import { JiggleViewer } from "../viewer/JiggleViewer";
+import { AutoMotionControls, DEFAULT_AUTO_MOTION, type AutoMotionSettings } from "./AutoMotionControls";
 
 export interface PreviewSlice {
   id: string;
@@ -37,7 +38,7 @@ export function EpisodePreview({ slices, maxWidth = 480 }: EpisodePreviewProps):
   const viewerRef = useRef<JiggleViewer | null>(null);
   const elements = useRef(new Map<string, HTMLDivElement>()).current;
   const dragging = useRef(false);
-  const [auto, setAuto] = useState(true);
+  const [auto, setAuto] = useState<AutoMotionSettings>(DEFAULT_AUTO_MOTION);
   const [scrollEnabled, setScrollEnabled] = useState(true);
   const [gain, setGain] = useState(DEFAULT_SCROLL_GAIN);
   const [smoothing, setSmoothing] = useState(DEFAULT_SCROLL_SMOOTHING_SECONDS);
@@ -95,7 +96,12 @@ export function EpisodePreview({ slices, maxWidth = 480 }: EpisodePreviewProps):
     };
   }, [painted, elements]);
 
-  useEffect(() => { adapters.auto.enabled = auto; }, [auto, adapters]);
+  useEffect(() => {
+    adapters.auto.enabled = auto.enabled;
+    adapters.auto.motion = auto.motion;
+    adapters.auto.strength = auto.strength;
+    adapters.auto.periodMs = auto.periodMs;
+  }, [auto, adapters]);
   useEffect(() => { adapters.scroll.gain = gain; }, [gain, adapters]);
   useEffect(() => { adapters.scroll.smoothingSeconds = smoothing; }, [smoothing, adapters]);
   useEffect(() => { adapters.scroll.enabled = scrollEnabled; }, [scrollEnabled, adapters]);
@@ -117,10 +123,7 @@ export function EpisodePreview({ slices, maxWidth = 480 }: EpisodePreviewProps):
   return (
     <div style={{ display: "grid", gap: 8, justifyItems: "center" }}>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
-        <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <input type="checkbox" checked={auto} onChange={(event) => setAuto(event.currentTarget.checked)} />
-          자동으로 흔들기
-        </label>
+        <AutoMotionControls value={auto} onChange={setAuto} />
         <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
           <input
             type="checkbox"

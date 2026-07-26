@@ -3,6 +3,7 @@ import { JiggleViewer } from "../viewer/JiggleViewer";
 import { createAutoAdapter } from "../input/auto";
 import { createPointerAdapter } from "../input/pointer";
 import type { JiggleProject } from "../core/types";
+import { AutoMotionControls, DEFAULT_AUTO_MOTION, type AutoMotionSettings } from "./AutoMotionControls";
 
 export interface LivePreviewProps {
   image: HTMLImageElement;
@@ -20,7 +21,7 @@ export function LivePreview({ image, project }: LivePreviewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const cutRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<JiggleViewer | null>(null);
-  const [auto, setAuto] = useState(true);
+  const [auto, setAuto] = useState<AutoMotionSettings>(DEFAULT_AUTO_MOTION);
 
   const pointer = useMemo(() => createPointerAdapter(), []);
   const autoAdapter = useMemo(() => createAutoAdapter(), []);
@@ -61,7 +62,12 @@ export function LivePreview({ image, project }: LivePreviewProps) {
     return () => viewer.unregister("preview");
   }, [project, image]);
 
-  useEffect(() => { autoAdapter.enabled = auto; }, [auto, autoAdapter]);
+  useEffect(() => {
+    autoAdapter.enabled = auto.enabled;
+    autoAdapter.motion = auto.motion;
+    autoAdapter.strength = auto.strength;
+    autoAdapter.periodMs = auto.periodMs;
+  }, [auto, autoAdapter]);
 
   /** 포인터 좌표를 호스트 박스 기준 0..1 로 넘긴다. 뷰어가 강체 프레임 목표로 쓴다. */
   const toLocal = (event: React.PointerEvent): { x: number; y: number } => {
@@ -76,10 +82,7 @@ export function LivePreview({ image, project }: LivePreviewProps) {
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
-        <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <input type="checkbox" checked={auto} onChange={(event) => setAuto(event.currentTarget.checked)} />
-          자동으로 흔들기
-        </label>
+        <AutoMotionControls value={auto} onChange={setAuto} />
         <span style={{ color: "#666" }}>이미지를 끌면 그 방향으로 흔들립니다.</span>
       </div>
 

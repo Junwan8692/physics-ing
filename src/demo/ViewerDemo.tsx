@@ -16,10 +16,20 @@ interface Slice {
 
 // ponytail: objectURL을 해제하지 않는다. 데모 페이지 수명이 곧 URL 수명이고,
 // 정적 <img>와 WebGL 텍스처가 같은 URL을 공유해서 해제 시점을 잡는 게 더 비싸다.
+/**
+ * decode() 가 아니라 onload 로 기다린다.
+ * 디코드된 1280×5120 슬라이스는 25MB고, 회차 한 편이면 수십 장이다. decode() 는 그걸
+ * 전부 즉시 래스터화해서 브라우저가 뷰포트 밖 비트맵을 회수하지 못하게 만든다.
+ * onload 면 크기는 읽히고 래스터화 시점은 브라우저가 정한다 — 웹툰 뷰어와 같은 조건.
+ */
 function loadImage(file: File): Promise<HTMLImageElement> {
-  const image = new Image();
-  image.src = URL.createObjectURL(file);
-  return image.decode().then(() => image);
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`${file.name} 이미지를 읽지 못했습니다.`));
+    image.src = URL.createObjectURL(file);
+  });
 }
 
 /** 프로젝트 JSON과 이미지를 한 번에 고르게 한다. 매칭은 `source.src`의 파일명. */

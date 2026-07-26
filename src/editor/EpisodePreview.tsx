@@ -2,7 +2,11 @@ import { useEffect, useMemo, useReducer, useRef, useState, type PointerEvent as 
 import type { JiggleProject } from "../core/types";
 import { createAutoAdapter } from "../input/auto";
 import { createPointerAdapter } from "../input/pointer";
-import { createScrollAdapter } from "../input/scroll";
+import {
+  createScrollAdapter,
+  DEFAULT_SCROLL_GAIN,
+  DEFAULT_SCROLL_SMOOTHING_SECONDS,
+} from "../input/scroll";
 import { JiggleViewer } from "../viewer/JiggleViewer";
 
 export interface PreviewSlice {
@@ -35,6 +39,8 @@ export function EpisodePreview({ slices, maxWidth = 480 }: EpisodePreviewProps):
   const dragging = useRef(false);
   const [auto, setAuto] = useState(true);
   const [scrollEnabled, setScrollEnabled] = useState(true);
+  const [gain, setGain] = useState(DEFAULT_SCROLL_GAIN);
+  const [smoothing, setSmoothing] = useState(DEFAULT_SCROLL_SMOOTHING_SECONDS);
   // 이미지가 늦게 로드되면 그때 비율을 알게 되므로 한 번 더 그린다.
   const [, redraw] = useReducer((count: number) => count + 1, 0);
 
@@ -90,6 +96,8 @@ export function EpisodePreview({ slices, maxWidth = 480 }: EpisodePreviewProps):
   }, [painted, elements]);
 
   useEffect(() => { adapters.auto.enabled = auto; }, [auto, adapters]);
+  useEffect(() => { adapters.scroll.gain = gain; }, [gain, adapters]);
+  useEffect(() => { adapters.scroll.smoothingSeconds = smoothing; }, [smoothing, adapters]);
   useEffect(() => { adapters.scroll.enabled = scrollEnabled; }, [scrollEnabled, adapters]);
 
   /** 포인터 좌표를 스크롤 컬럼 기준 0..1 로 넘긴다 (LivePreview 와 같은 규약). */
@@ -123,6 +131,29 @@ export function EpisodePreview({ slices, maxWidth = 480 }: EpisodePreviewProps):
         </label>
         <span style={{ color: "#666" }}>칠한 슬라이스 {painted.length} / {slices.length}</span>
       </div>
+
+      {/* 스크롤 반응은 결국 눈으로 맞추는 값이라 노브를 노출한다. 기본값은 실측으로 정했고
+          (src/input/scroll.ts 주석 참조) 세게는 올리지 말 것 — 구동 세기 3부터 메시가 접힌다. */}
+      {scrollEnabled && (
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 12, color: "#555" }}>
+          <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            반응 세기
+            <input
+              type="range" min={0.0001} max={0.0012} step={0.0001} value={gain}
+              onChange={(event) => setGain(event.currentTarget.valueAsNumber)}
+            />
+            <output style={{ width: "4.5rem" }}>{gain.toFixed(4)}</output>
+          </label>
+          <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            평활
+            <input
+              type="range" min={0.05} max={0.5} step={0.01} value={smoothing}
+              onChange={(event) => setSmoothing(event.currentTarget.valueAsNumber)}
+            />
+            <output style={{ width: "3rem" }}>{smoothing.toFixed(2)}s</output>
+          </label>
+        </div>
+      )}
 
       <div
         ref={scrollRef}
